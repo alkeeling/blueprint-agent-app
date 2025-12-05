@@ -5,7 +5,7 @@ import { neon } from "@neondatabase/serverless";
 
 export const runtime = "edge";
 
-// --- Environment setup ---------------------------------------------
+// --- Environment setup -------------------------------------------------
 
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
 const DATABASE_URL = process.env.DATABASE_URL;
@@ -16,15 +16,14 @@ if (!OPENAI_API_KEY) {
   );
 }
 
-// create OpenAI client (will only be used if key exists)
 const openai = new OpenAI({
-  apiKey: OPENAI_API_KEY || "",
+  apiKey: OPENAI_API_KEY!,
 });
 
 // Neon client is optional: if DATABASE_URL is missing, we just skip logging
 const sql = DATABASE_URL ? neon(DATABASE_URL) : null;
 
-// --- Handler --------------------------------------------------------
+// --- Handler ------------------------------------------------------------
 
 export async function POST(req: NextRequest) {
   try {
@@ -32,8 +31,8 @@ export async function POST(req: NextRequest) {
     const message = (body.message as string | undefined)?.trim();
     const userId = (body.userId as string | undefined) || "anon";
     const history =
-      (body.history as { role: "user" | "assistant"; content: string }[] | undefined) ??
-      [];
+      (body.history as { role: "user" | "assistant"; content: string }[] |
+        undefined) ?? [];
 
     if (!message) {
       return NextResponse.json(
@@ -49,24 +48,30 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Build chat history for the model
-    const modelMessages: OpenAI.Chat.ChatCompletionMessageParam[] = [
+    // Build chat history for the model. We keep this untyped here
+    // and cast once when we call OpenAI to avoid TS union headaches.
+    const modelMessages = [
       {
-        role: "system",
+        role: "system" as const,
         content:
           "You are the Blueprint Agent. You help users shape and evolve their data into dashboards and visualisations.",
       },
       ...history.map((m) => ({
-        role: m.role === "assistant" ? "assistant" : "user",
+        role: (m.role === "assistant" ? "assistant" : "user") as
+          | "assistant"
+          | "user",
         content: m.content,
       })),
-      { role: "user", content: message },
+      {
+        role: "user" as const,
+        content: message,
+      },
     ];
 
     // Call OpenAI (non-streaming)
     const completion = await openai.chat.completions.create({
       model: "gpt-4.1-mini",
-      messages: modelMessages,
+      messages: modelMessages as OpenAI.Chat.ChatCompletionMessageParam[],
     });
 
     const reply =
