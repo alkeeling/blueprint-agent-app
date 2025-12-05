@@ -1,33 +1,36 @@
-import { auth } from "@clerk/nextjs/server";
+// app/api/chat/history/route.ts
 import { NextResponse } from "next/server";
-import { createClient } from "@supabase/supabase-js";
+import { auth } from "@clerk/nextjs/server";
+import { neon } from "@neondatabase/serverless";
+
+const DATABASE_URL = process.env.DATABASE_URL;
+const sql = DATABASE_URL ? neon(DATABASE_URL) : null;
 
 export async function GET() {
-  const { userId } = auth();
-  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  try {
+    const { userId } = auth();
 
-  const supabase = createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_ANON_KEY! // For read access, anon is fine
-  );
+    // If not signed in or no DB, just return empty history
+    if (!userId || !sql) {
+      return NextResponse.json([], { status: 200 });
+    }
 
-  const { data: sessions } = await supabase
-    .from("chat_sessions")
-    .select("id, created_at")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
+    // Pull recent messages for this user
+    const rows = await sql<{
+      role: "user" | "assistant";
+      content: string;
+    }>`
+      select m.role, m.content
+      from chat_messages m
+      join chat_sessions s on m.session_id = s.id
+      where s.user_id = ${userId}
+      order by m.created_at asc
+      limit 50
+    `;
 
-  if (sessions.length === 0)
-    return NextResponse.json({ sessions: [] });
-
-  // load messages for newest session
-  const newestSession = sessions[0];
-
-  const { data: messages } = await supabase
-    .from("chat_messages")
-    .select("*")
-    .eq("session_id", newestSession.id)
-    .order("created_at", { ascending: true });
-
-  return NextResponse.json({ sessionId: newestSession.id, messages });
+    return NextResponse.json(rows, { status: 200 });
+  } catch (err) {
+    console.error("Error in /api/chat/history:", err);
+    return NextResponse.json([], { status: 200 });
+  }
 }
